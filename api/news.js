@@ -1,4 +1,3 @@
-// /api/news.js — Live financial news from RSS feeds
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=120');
@@ -11,20 +10,17 @@ export default async function handler(req, res) {
     { url: 'https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US', src: 'YF' },
   ];
 
-  // Decode HTML entities server-side
   function decode(s) {
     if (!s) return '';
     return s
       .replace(/<!\[CDATA\[|\]\]>/g, '')
       .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
       .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'")
-      .replace(/&#x20[12][0-9a-fA-F];/g, "'")  // smart quotes
-      .replace(/&#x201[cCdD];/g, '"')           // smart double quotes
-      .replace(/&#x20(14|13);/g, '—')           // em/en dash
-      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n))
+      .replace(/&#x201[89];/g, "'").replace(/&#x201[cCdD];/g, '"')
+      .replace(/&#x20(14|13);/g, '-')
+      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
       .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
-      .replace(/<[^>]+>/g, '')  // strip any remaining HTML tags
-      .trim();
+      .replace(/<[^>]+>/g, '').trim();
   }
 
   try {
@@ -47,7 +43,9 @@ export default async function handler(req, res) {
             const date = new Date(pubDate);
             items.push({
               title,
-              time: !isNaN(date) ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York' }) : '',
+              time: !isNaN(date) ? date.toLocaleTimeString('en-US', {
+                hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York'
+              }) : '',
               ts: !isNaN(date) ? date.getTime() : 0,
               src: feed.src,
             });
@@ -59,9 +57,13 @@ export default async function handler(req, res) {
 
     const all = results.filter(r => r.status === 'fulfilled').flatMap(r => r.value).filter(i => i.ts > 0);
     const seen = new Set();
-    const deduped = all.filter(i => { const k = i.title.toLowerCase().slice(0, 40); if (seen.has(k)) return false; seen.add(k); return true; });
+    const deduped = all.filter(i => {
+      const k = i.title.toLowerCase().slice(0, 40);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
     deduped.sort((a, b) => b.ts - a.ts);
-
     return res.status(200).json({ news: deduped.slice(0, 40), ts: Date.now() });
   } catch (err) {
     return res.status(500).json({ error: err.message });

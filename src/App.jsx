@@ -3,13 +3,12 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from "react"
 if(typeof window!=='undefined'&&!window.__eh){window.__eh=true;window.onerror=function(m,s,l,c,e){const d=document.createElement('div');d.style.cssText='position:fixed;inset:0;background:#000;color:#f33;padding:20px;font:13px monospace;z-index:99999;overflow:auto';d.innerHTML='<b>VIPER ERROR</b><pre>'+m+'\n'+(e?.stack||'')+'</pre><button onclick="location.reload()" style="margin-top:10px;padding:6px 16px;background:#f80;color:#000;border:none;cursor:pointer;font:13px monospace">RELOAD</button>';document.body.appendChild(d)};window.addEventListener('unhandledrejection',e=>console.error(e.reason))}
 
 /* ═══ FORMATTERS ═══ */
-const fp=(n,r)=>{if(n==null||!isFinite(n))return"—";const a=Math.abs(r||n);return a>=10?n.toFixed(2):a>=1?n.toFixed(2):n.toFixed(4)};
+const fp=(n)=>{if(n==null||!isFinite(n))return"—";return n.toFixed(2)};
 const fpc=n=>n==null||!isFinite(n)?"—":(n>=0?"+":"")+n.toFixed(2)+"%";
-const fv=n=>{if(!n||!isFinite(n))return"";if(n>=1e9)return(n/1e9).toFixed(1)+"B";if(n>=1e6)return(n/1e6).toFixed(1)+"M";if(n>=1e3)return(n/1e3).toFixed(0)+"K";return n+""};
+const fv=n=>{if(!n||!isFinite(n))return"—";if(n>=1e9)return(n/1e9).toFixed(1)+"B";if(n>=1e6)return(n/1e6).toFixed(1)+"M";if(n>=1e3)return(n/1e3).toFixed(0)+"K";return n+""};
 const ftime=tz=>{try{return new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:tz})}catch{return""}};
 const fdate=tz=>{try{return new Date().toLocaleDateString('en-US',{weekday:'short',month:'2-digit',day:'2-digit',timeZone:tz})}catch{return""}};
-// Decode HTML entities from RSS
-const decodeHTML=s=>{if(!s)return'';const t=document.createElement('textarea');t.innerHTML=s;return t.value;};
+const decHTML=s=>{if(!s||typeof document==='undefined')return s||'';const t=document.createElement('textarea');t.innerHTML=s;return t.value;};
 
 /* ═══ COLORS ═══ */
 const C={
@@ -62,8 +61,8 @@ const useNews=(iv=60000)=>{
   const[news,setNews]=useState([]);const[st,setSt]=useState('loading');
   const f=useCallback(async()=>{try{
     const r=await fetch('/api/news');if(!r.ok)throw 0;
-    const j=await r.json();setNews((j.news||[]).map(n=>({...n,title:decodeHTML(n.title)})));setSt('live');
-  }catch{setSt('error')}},[]);
+    const j=await r.json();setNews((j.news||[]).map(n=>({...n,title:decHTML(n.title)})));setSt('live');
+  }catch{setSt(s=>s==='loading'?'error':'stale')}},[]);
   useEffect(()=>{f();const t=setInterval(f,iv);return()=>clearInterval(t)},[f,iv]);
   return{news,st};
 };
@@ -75,55 +74,24 @@ const Sp=({d,w=55,h=14,c})=>{
   return<svg width={w} height={h} style={{display:'block'}}><polyline points={v.map((val,i)=>`${(i/(v.length-1))*w},${h-1-((val-mn)/rg)*(h-2)}`).join(' ')} fill="none" stroke={c||C.up} strokeWidth="1.2"/></svg>;
 };
 
-/* ═══ TRADINGVIEW WIDGET ═══ */
-function TVWidget({symbol}){
-  const containerRef=useRef(null);
-  const idRef=useRef('tv_'+Math.random().toString(36).slice(2));
+/* ═══ TRADINGVIEW CHART — direct iframe embed ═══ */
+// This uses TradingView's public embed URL which works without any script injection
+const TVChart=React.memo(({symbol})=>{
+  const src=`https://s.tradingview.com/widgetembed/?frameElementId=tv_chart&symbol=${encodeURIComponent(symbol)}&interval=15&hidesidetoolbar=0&symboledit=1&saveimage=0&toolbarbg=0a0a16&studies=MASimple%7B14%7D&theme=dark&style=1&timezone=America%2FChicago&studies_overrides=%7B%7D&overrides=%7B%22paneProperties.background%22%3A%22%230a0a16%22%2C%22paneProperties.backgroundType%22%3A%22solid%22%2C%22scalesProperties.backgroundColor%22%3A%22%230a0a16%22%7D&enabled_features=[]&disabled_features=[]&locale=en&utm_source=www.tradingview.com&utm_medium=widget_new&utm_campaign=chart`;
+  return(
+    <iframe
+      key={symbol}
+      src={src}
+      style={{width:'100%',height:'100%',border:'none',display:'block'}}
+      allowTransparency="true"
+      allow="encrypted-media"
+    />
+  );
+});
 
-  useEffect(()=>{
-    if(!containerRef.current)return;
-    // Clear previous
-    containerRef.current.innerHTML='';
-    // Create widget div
-    const widgetDiv=document.createElement('div');
-    widgetDiv.id=idRef.current;
-    widgetDiv.style.height='100%';
-    widgetDiv.style.width='100%';
-    containerRef.current.appendChild(widgetDiv);
-    // Create script
-    const script=document.createElement('script');
-    script.type='text/javascript';
-    script.src='https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-    script.async=true;
-    script.textContent=JSON.stringify({
-      container_id:idRef.current,
-      autosize:true,
-      symbol:symbol||'NASDAQ:AAPL',
-      interval:"15",
-      timezone:"America/Chicago",
-      theme:"dark",
-      style:"1",
-      locale:"en",
-      backgroundColor:"rgba(9,9,26,1)",
-      gridColor:"rgba(30,30,50,0.6)",
-      allow_symbol_change:true,
-      hide_top_toolbar:false,
-      hide_legend:false,
-      save_image:false,
-      calendar:false,
-      support_host:"https://www.tradingview.com",
-    });
-    containerRef.current.appendChild(script);
-
-    return()=>{if(containerRef.current)containerRef.current.innerHTML='';};
-  },[symbol]);
-
-  return <div ref={containerRef} style={{width:'100%',height:'100%'}}/>;
-}
-
-/* ═══ PANEL COMPONENT ═══ */
-const Panel=({title,children,ticker,style:s,nopad,right})=>(
-  <div style={{background:C.panel,border:`1px solid ${C.border}`,display:'flex',flexDirection:'column',overflow:'hidden',minWidth:0,...s}}>
+/* ═══ PANEL ═══ */
+const Panel=({title,children,ticker,style:st,nopad,right})=>(
+  <div style={{background:C.panel,border:`1px solid ${C.border}`,display:'flex',flexDirection:'column',overflow:'hidden',minWidth:0,...st}}>
     <div style={{background:C.tbar,borderBottom:`1px solid ${C.tbord}`,padding:'0 6px',display:'flex',alignItems:'center',justifyContent:'space-between',height:20,flexShrink:0}}>
       <div style={{display:'flex',alignItems:'center',gap:5,overflow:'hidden'}}>
         <span style={{color:C.amber,fontSize:9}}>◆</span>
@@ -132,8 +100,8 @@ const Panel=({title,children,ticker,style:s,nopad,right})=>(
       </div>
       <div style={{display:'flex',alignItems:'center',gap:2,flexShrink:0}}>
         {right}
-        <span style={{color:'#555',fontSize:12,marginLeft:4,cursor:'pointer'}}>□</span>
-        <span style={{color:'#555',fontSize:12,cursor:'pointer'}}>≡</span>
+        <span style={{color:'#555',fontSize:11,marginLeft:4,cursor:'pointer'}}>□</span>
+        <span style={{color:'#555',fontSize:11,cursor:'pointer'}}>≡</span>
       </div>
     </div>
     <div style={{flex:1,overflow:'auto',padding:nopad?0:'3px 5px',minHeight:0,background:C.gbg}}>{children}</div>
@@ -141,7 +109,7 @@ const Panel=({title,children,ticker,style:s,nopad,right})=>(
 );
 
 /* ═══ MAIN ═══ */
-export default function ViperTerminal(){
+export default function VT(){
   const[clk,setClk]=useState({});
   const[focus,setFocus]=useState('AAPL');
   const[focusTV,setFocusTV]=useState('NASDAQ:AAPL');
@@ -150,13 +118,13 @@ export default function ViperTerminal(){
   const{d:Q,st:qst}=useQ(allSyms,12000);
   const{news,st:nst}=useNews(60000);
 
-  useEffect(()=>{const t_=()=>setClk({
+  useEffect(()=>{const fn=()=>setClk({
     c:ftime('America/Chicago'),cd:fdate('America/Chicago'),
     n:ftime('America/New_York'),nd:fdate('America/New_York'),
     l:ftime('Europe/London'),ld:fdate('Europe/London'),
     h:ftime('Asia/Hong_Kong'),hd:fdate('Asia/Hong_Kong'),
     s:ftime('Australia/Sydney'),sd:fdate('Australia/Sydney'),
-  });t_();const t=setInterval(t_,1000);return()=>clearInterval(t)},[]);
+  });fn();const t=setInterval(fn,1000);return()=>clearInterval(t)},[]);
 
   const fut=useMemo(()=>FUT.map(f=>{const q=Q[f.y];return q?{...q,sym:f.d,name:f.n,tv:f.tv}:{sym:f.d,name:f.n,tv:f.tv,last:0,chg:0,pctChg:0,high:0,low:0,vol:0,spark:[]}}),[Q]);
   const stk=useMemo(()=>STK.map(s=>{const q=Q[s.s];return q?{...q,tv:s.tv}:{sym:s.s,tv:s.tv,last:0,chg:0,pctChg:0,vol:0,spark:[]}}),[Q]);
@@ -164,6 +132,10 @@ export default function ViperTerminal(){
   const fq=Q[focus]||null;
 
   const sel=(ySym,tvSym)=>{setFocus(ySym);setFocusTV(tvSym);};
+
+  // Table cell/row styles
+  const td={padding:'2px 6px',fontSize:13,whiteSpace:'nowrap'};
+  const tdr={...td,textAlign:'right'};
 
   return(
     <div style={{width:'100vw',height:'100vh',background:C.bg,display:'flex',flexDirection:'column',
@@ -173,124 +145,127 @@ export default function ViperTerminal(){
       <div style={{background:'#08081a',borderBottom:`1px solid ${C.tbord}`,padding:'0 10px',display:'flex',alignItems:'center',justifyContent:'space-between',height:24,flexShrink:0}}>
         <div style={{display:'flex',alignItems:'center',gap:10}}>
           <span style={{color:C.orange,fontWeight:900,fontSize:15,letterSpacing:1}}>VIPER</span>
-          <span style={{color:C.dim,fontSize:11}}>Terminal v0.6</span>
           <span style={{color:C.vdim}}>│</span>
-          <span style={{width:7,height:7,borderRadius:'50%',background:qst==='live'?C.up:C.amber,display:'inline-block',boxShadow:qst==='live'?`0 0 4px ${C.up}`:'none'}}/>
-          <span style={{color:qst==='live'?C.up:C.amber,fontSize:10,fontWeight:600}}>{qst==='live'?'LIVE DATA':'CONNECTING...'}</span>
-          {nst==='live'&&<><span style={{color:C.vdim}}>│</span><span style={{color:C.up,fontSize:10}}>● NEWS LIVE</span></>}
+          <span style={{width:7,height:7,borderRadius:'50%',background:qst==='live'?C.up:C.amber,display:'inline-block'}}/>
+          <span style={{color:qst==='live'?C.up:C.amber,fontSize:11}}>{qst==='live'?'LIVE DATA':qst.toUpperCase()}</span>
+          {nst==='live'&&<><span style={{color:C.vdim}}>│</span><span style={{color:C.up,fontSize:11}}>● NEWS</span></>}
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:10}}>
-          <span style={{color:C.gray,fontSize:12}}>{new Date().toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric',year:'numeric'})}</span>
-          <span style={{color:C.amber,fontWeight:700,fontSize:15}}>{clk.n||''}</span>
-        </div>
+        <span style={{color:C.amber,fontWeight:700,fontSize:15}}>{clk.n||''} <span style={{color:C.gray,fontWeight:400,fontSize:12}}>{new Date().toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</span></span>
       </div>
 
-      {/* ═══ MAIN LAYOUT — 3 rows ═══ */}
+      {/* ═══ MAIN: flexbox rows ═══ */}
       <div style={{flex:1,display:'flex',flexDirection:'column',gap:1,padding:1,overflow:'hidden'}}>
 
-        {/* ═══ TOP ROW: News | Chart | Quote ═══ */}
+        {/* ═══ ROW 1: News | CHART | Quote ═══ */}
         <div style={{flex:5,display:'flex',gap:1,minHeight:0}}>
 
-          {/* NEWS — left column */}
-          <Panel title="News Feed" style={{flex:'0 0 28%'}}
-            right={<span style={{color:nst==='live'?C.up:C.amber,fontSize:9}}>● {nst==='live'?'LIVE':'...'}</span>}>
-            <div>
-              {news.length===0&&<div style={{color:C.dim,padding:10}}>Loading live news...</div>}
-              {news.slice(0,18).map((n,i)=>(
-                <div key={i} style={{display:'flex',gap:5,padding:'2px 0',borderBottom:`1px solid ${C.gbord}`}}>
-                  <span style={{color:C.dim,fontSize:11,flexShrink:0,width:35}}>{n.time}</span>
-                  <span style={{color:n.src==='CNBC'?C.amber:n.src==='MW'?C.up:n.src==='YF'?'#aa77ff':C.gray,fontWeight:700,fontSize:11,flexShrink:0,width:32}}>{n.src}</span>
-                  <span style={{color:'#ccc',fontSize:12,lineHeight:'17px'}}>{n.title}</span>
-                </div>
-              ))}
-            </div>
-          </Panel>
-
-          {/* CHART — center, biggest */}
-          <Panel title="Chart" ticker={focusTV} nopad style={{flex:'1 1 44%'}}>
-            <TVWidget symbol={focusTV}/>
-          </Panel>
-
-          {/* QUOTE — right column */}
-          <Panel title="Quote" ticker={focus} style={{flex:'0 0 28%'}}>
-            {fq?(<div>
-              {/* Bloomberg green banner */}
-              <div style={{background:C.greenBg,border:`1px solid ${C.greenBd}`,padding:'4px 8px',marginBottom:6,display:'flex',alignItems:'baseline',gap:8,flexWrap:'wrap'}}>
-                <span style={{color:C.amber,fontWeight:700,fontSize:15}}>{focus}</span>
-                <span style={{color:C.white,fontWeight:700,fontSize:18}}>${fq.last?.toFixed(2)}</span>
-                <span style={{color:cc(fq.chg),fontWeight:700,fontSize:14}}>{fq.chg>0?'+':''}{fq.chg?.toFixed(2)} ({fpc(fq.pctChg)})</span>
+          {/* NEWS */}
+          <Panel title="News Feed" style={{width:'26%',flexShrink:0}}
+            right={<span style={{color:nst==='live'?C.up:C.amber,fontSize:9}}>● LIVE</span>}>
+            {news.length===0&&<div style={{color:C.dim,padding:10}}>Loading...</div>}
+            {news.slice(0,20).map((n,i)=>(
+              <div key={i} style={{display:'flex',gap:5,padding:'1px 0',borderBottom:`1px solid ${C.gbord}`}}>
+                <span style={{color:C.dim,fontSize:11,flexShrink:0,width:34}}>{n.time}</span>
+                <span style={{color:n.src==='CNBC'?C.amber:n.src==='MW'?C.up:'#a070ff',fontWeight:700,fontSize:11,flexShrink:0,width:34}}>{n.src}</span>
+                <span style={{color:'#ccc',fontSize:12,lineHeight:'17px'}}>{n.title}</span>
               </div>
-              {/* Stats */}
-              <table style={{width:'100%',borderCollapse:'collapse',marginBottom:6}}>
+            ))}
+          </Panel>
+
+          {/* TRADINGVIEW CHART — proper iframe */}
+          <Panel title="Chart" ticker={focusTV} nopad style={{flex:1}}>
+            <TVChart symbol={focusTV}/>
+          </Panel>
+
+          {/* QUOTE */}
+          <Panel title="Quote" ticker={focus} style={{width:'22%',flexShrink:0}}>
+            {fq?(<div>
+              <div style={{background:C.greenBg,border:`1px solid ${C.greenBd}`,padding:'5px 8px',marginBottom:6}}>
+                <div style={{display:'flex',alignItems:'baseline',gap:6,flexWrap:'wrap'}}>
+                  <span style={{color:C.amber,fontWeight:700,fontSize:16}}>{focus}</span>
+                  <span style={{color:C.white,fontWeight:700,fontSize:18}}>${fp(fq.last)}</span>
+                </div>
+                <div style={{color:cc(fq.chg),fontWeight:700,fontSize:14,marginTop:2}}>
+                  {fq.chg>0?'+':''}{fp(fq.chg)} ({fpc(fq.pctChg)})
+                </div>
+              </div>
+              <table style={{width:'100%',borderCollapse:'collapse'}}>
                 <tbody>
-                  {[['High',fq.high?.toFixed(2),'Low',fq.low?.toFixed(2)],
-                    ['Open',fq.prevClose?.toFixed(2),'Prev Cls',fq.prevClose?.toFixed(2)],
+                  {[['High',fp(fq.high),'Low',fp(fq.low)],
+                    ['Open',fp(fq.prevClose),'Prev Cls',fp(fq.prevClose)],
                     ['Volume',fv(fq.vol),'State',fq.mktState||'—'],
-                    ['Exchange',fq.exchange||'—','',null],
                   ].map((r,i)=>(
                     <tr key={i} style={{borderBottom:`1px solid ${C.gbord}`,background:i%2?C.galt:C.gbg}}>
-                      <td style={{padding:'3px 6px',color:C.gray,fontSize:12}}>{r[0]}</td>
-                      <td style={{padding:'3px 6px',color:C.white,fontWeight:600,fontSize:13}}>{r[1]||'—'}</td>
-                      {r[2]!==''&&<td style={{padding:'3px 6px',color:C.gray,fontSize:12}}>{r[2]}</td>}
-                      {r[3]!==null&&r[3]!==undefined&&<td style={{padding:'3px 6px',color:C.white,fontWeight:600,fontSize:13}}>{r[3]||'—'}</td>}
-                      {r[3]===null&&<td colSpan={2}/>}
+                      <td style={{...td,color:C.gray,fontSize:11}}>{r[0]}</td>
+                      <td style={{...td,color:C.white,fontWeight:600}}>{r[1]}</td>
+                      <td style={{...td,color:C.gray,fontSize:11}}>{r[2]}</td>
+                      <td style={{...td,color:C.white,fontWeight:600}}>{r[3]}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {/* Intraday spark */}
-              <div style={{borderTop:`1px solid ${C.gbord}`,paddingTop:4}}>
-                <div style={{color:C.gray,fontSize:10,marginBottom:3}}>Intraday</div>
-                {fq.spark?.length>2&&<svg viewBox="0 0 300 50" style={{width:'100%',height:50}}>
-                  {(()=>{const d=fq.spark.filter(x=>x!=null&&isFinite(x));if(d.length<2)return null;const mn=Math.min(...d),mx=Math.max(...d),rg=mx-mn||1;
-                    const pts=d.map((v,i)=>`${(i/(d.length-1))*300},${48-((v-mn)/rg)*44}`).join(' ');
-                    return<><polygon points={`0,48 ${pts} 300,48`} fill={fq.chg>=0?'rgba(0,180,0,0.07)':'rgba(220,0,0,0.07)'}/><polyline points={pts} fill="none" stroke={fq.chg>=0?C.up:C.dn} strokeWidth="1.5"/></>;
-                  })()}
-                </svg>}
-              </div>
+              {/* Sparkline */}
+              {fq.spark?.length>2&&(
+                <div style={{marginTop:6,padding:'4px 0',borderTop:`1px solid ${C.gbord}`}}>
+                  <div style={{color:C.dim,fontSize:10,marginBottom:3}}>Intraday</div>
+                  <svg viewBox="0 0 280 55" style={{width:'100%',height:55}}>
+                    {(()=>{const d=fq.spark.filter(x=>x!=null&&isFinite(x));if(d.length<2)return null;
+                      const mn=Math.min(...d),mx=Math.max(...d),rg=mx-mn||1;
+                      const pts=d.map((v,i)=>`${(i/(d.length-1))*280},${52-((v-mn)/rg)*48}`).join(' ');
+                      return<><polygon points={`0,52 ${pts} 280,52`} fill={fq.chg>=0?'rgba(0,200,0,0.06)':'rgba(255,30,30,0.06)'}/><polyline points={pts} fill="none" stroke={fq.chg>=0?C.up:C.dn} strokeWidth="1.5"/></>;
+                    })()}
+                  </svg>
+                </div>
+              )}
               <div style={{color:C.dim,fontSize:11,marginTop:4}}>{fq.name||''}</div>
             </div>):(<div style={{color:C.dim,padding:10}}>Loading...</div>)}
           </Panel>
         </div>
 
-        {/* ═══ MIDDLE ROW: Indices table | Ticker cards ═══ */}
+        {/* ═══ ROW 2: Indices + Futures | Equities + Commodities ═══ */}
         <div style={{flex:4,display:'flex',gap:1,minHeight:0}}>
 
-          {/* World Indices + Futures */}
-          <Panel title="World Equity Indices & Futures" nopad style={{flex:'1 1 70%'}}
-            right={<span style={{fontSize:10,color:C.dim}}>Standard │ Movers │ Volatility │ Futures</span>}>
+          {/* WORLD INDICES */}
+          <Panel title="World Equity Indices & Futures" nopad style={{flex:7}}>
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead><tr style={{borderBottom:`1px solid ${C.gbord}`,background:C.galt,position:'sticky',top:0,zIndex:1}}>
-                {['Index','Last','Chg','%Chg','','Vol','High','Low'].map((h,i)=>(
-                  <th key={i} style={{padding:'3px 6px',color:C.dim,textAlign:i===0?'left':'right',fontSize:11,fontWeight:400}}>{h}</th>
-                ))}
+                <th style={{...td,color:C.dim,fontSize:11,textAlign:'left',fontWeight:400}}>Index</th>
+                <th style={{...tdr,color:C.dim,fontSize:11,fontWeight:400}}>Last</th>
+                <th style={{...tdr,color:C.dim,fontSize:11,fontWeight:400}}>Chg</th>
+                <th style={{...tdr,color:C.dim,fontSize:11,fontWeight:400}}>%Chg</th>
+                <th style={{...td,color:C.dim,fontSize:11,fontWeight:400,textAlign:'center',width:55}}></th>
+                <th style={{...tdr,color:C.dim,fontSize:11,fontWeight:400}}>Volume</th>
+                <th style={{...tdr,color:C.dim,fontSize:11,fontWeight:400}}>High</th>
+                <th style={{...tdr,color:C.dim,fontSize:11,fontWeight:400}}>Low</th>
               </tr></thead>
               <tbody>
                 {['Americas','EMEA','Asia/Pacific'].map(region=>(
                   <React.Fragment key={region}>
-                    <tr><td colSpan={8} style={{padding:'3px 6px',color:C.amber,fontWeight:700,background:'#0b0b1e',borderBottom:`1px solid ${C.gbord}`,fontSize:12}}>{region}</td></tr>
+                    <tr><td colSpan={8} style={{...td,color:C.amber,fontWeight:700,background:'#0b0b1e',borderBottom:`1px solid ${C.gbord}`,fontSize:12}}>{region}</td></tr>
                     {wld.filter(w=>w.r===region).map((w,i)=>(
-                      <tr key={w.display} style={{borderBottom:`1px solid ${C.gbord}`,background:i%2?C.galt:C.gbg,cursor:'pointer',height:22}} onClick={()=>sel(WLD.find(x=>x.d===w.display)?.y||'',w.tv)}>
-                        <td style={{padding:'2px 6px',color:C.white,fontWeight:600,fontSize:13}}>{w.display}</td>
-                        <td style={{padding:'2px 6px',textAlign:'right',color:C.white,fontSize:13}}>{w.last?fp(w.last,w.last):'···'}</td>
-                        <td style={{padding:'2px 6px',textAlign:'right',color:cc(w.chg),fontSize:13}}>{w.last?(w.chg>0?'+':'')+fp(w.chg,w.last):''}</td>
-                        <td style={{padding:'2px 6px',textAlign:'right',color:cc(w.pctChg),fontWeight:600,fontSize:13}}>{w.last?fpc(w.pctChg):''}</td>
+                      <tr key={w.display} style={{borderBottom:`1px solid ${C.gbord}`,background:i%2?C.galt:C.gbg,cursor:'pointer',height:23}}
+                        onClick={()=>sel(WLD.find(x=>x.d===w.display)?.y||'',w.tv)}>
+                        <td style={{...td,color:C.white,fontWeight:600}}>{w.display}</td>
+                        <td style={{...tdr,color:C.white}}>{w.last?fp(w.last):'···'}</td>
+                        <td style={{...tdr,color:cc(w.chg)}}>{w.last?(w.chg>0?'+':'')+fp(w.chg):''}</td>
+                        <td style={{...tdr,color:cc(w.pctChg),fontWeight:600}}>{w.last?fpc(w.pctChg):''}</td>
                         <td style={{padding:'2px',textAlign:'center'}}><Sp d={w.spark} w={50} h={14} c={w.chg>=0?C.up:C.dn}/></td>
-                        <td style={{padding:'2px 6px',textAlign:'right',color:C.dim,fontSize:12}}>{fv(w.vol)}</td>
-                        <td style={{padding:'2px 6px',textAlign:'right',color:C.dim,fontSize:12}}>{w.high?fp(w.high,w.last):''}</td>
-                        <td style={{padding:'2px 6px',textAlign:'right',color:C.dim,fontSize:12}}>{w.low?fp(w.low,w.last):''}</td>
+                        <td style={{...tdr,color:C.dim,fontSize:12}}>{fv(w.vol)}</td>
+                        <td style={{...tdr,color:C.dim,fontSize:12}}>{w.high?fp(w.high):''}</td>
+                        <td style={{...tdr,color:C.dim,fontSize:12}}>{w.low?fp(w.low):''}</td>
                       </tr>
                     ))}
                     {region==='Americas'&&fut.slice(0,6).map((f,i)=>(
-                      <tr key={f.sym} style={{borderBottom:`1px solid ${C.gbord}`,background:i%2?C.galt:C.gbg,cursor:'pointer',height:22}} onClick={()=>sel(FUT.find(x=>x.d===f.sym)?.y||'',f.tv)}>
-                        <td style={{padding:'2px 6px',color:C.amber,fontWeight:600,fontSize:13}}>{f.sym} <span style={{color:C.dim,fontSize:11}}>(Fut)</span></td>
-                        <td style={{padding:'2px 6px',textAlign:'right',color:C.white,fontSize:13}}>{f.last?fp(f.last,f.last):'···'}</td>
-                        <td style={{padding:'2px 6px',textAlign:'right',color:cc(f.chg),fontSize:13}}>{f.last?(f.chg>0?'+':'')+fp(f.chg,f.last):''}</td>
-                        <td style={{padding:'2px 6px',textAlign:'right',color:cc(f.pctChg),fontWeight:600,fontSize:13}}>{f.last?fpc(f.pctChg):''}</td>
+                      <tr key={f.sym} style={{borderBottom:`1px solid ${C.gbord}`,background:i%2?C.galt:C.gbg,cursor:'pointer',height:23}}
+                        onClick={()=>sel(FUT.find(x=>x.d===f.sym)?.y||'',f.tv)}>
+                        <td style={{...td,color:C.amber,fontWeight:600}}>{f.sym} <span style={{color:C.dim,fontSize:11}}>(Fut)</span></td>
+                        <td style={{...tdr,color:C.white}}>{f.last?fp(f.last):'···'}</td>
+                        <td style={{...tdr,color:cc(f.chg)}}>{f.last?(f.chg>0?'+':'')+fp(f.chg):''}</td>
+                        <td style={{...tdr,color:cc(f.pctChg),fontWeight:600}}>{f.last?fpc(f.pctChg):''}</td>
                         <td style={{padding:'2px',textAlign:'center'}}><Sp d={f.spark} w={50} h={14} c={f.chg>=0?C.up:C.dn}/></td>
-                        <td style={{padding:'2px 6px',textAlign:'right',color:C.dim,fontSize:12}}>{fv(f.vol)}</td>
-                        <td style={{padding:'2px 6px',textAlign:'right',color:C.dim,fontSize:12}}>{f.high?fp(f.high,f.last):''}</td>
-                        <td style={{padding:'2px 6px',textAlign:'right',color:C.dim,fontSize:12}}>{f.low?fp(f.low,f.last):''}</td>
+                        <td style={{...tdr,color:C.dim,fontSize:12}}>{fv(f.vol)}</td>
+                        <td style={{...tdr,color:C.dim,fontSize:12}}>{f.high?fp(f.high):''}</td>
+                        <td style={{...tdr,color:C.dim,fontSize:12}}>{f.low?fp(f.low):''}</td>
                       </tr>
                     ))}
                   </React.Fragment>
@@ -299,52 +274,44 @@ export default function ViperTerminal(){
             </table>
           </Panel>
 
-          {/* Right column: Equities + Commodities watchlist */}
-          <div style={{flex:'0 0 30%',display:'flex',flexDirection:'column',gap:1,overflow:'hidden'}}>
+          {/* RIGHT: Equities + Commodities */}
+          <div style={{flex:3,display:'flex',flexDirection:'column',gap:1}}>
             <Panel title="Equities" style={{flex:1}}>
               <table style={{width:'100%',borderCollapse:'collapse'}}>
-                <tbody>
-                  {stk.map((s,i)=>(
-                    <tr key={s.sym} style={{borderBottom:`1px solid ${C.gbord}`,background:i%2?C.galt:C.gbg,cursor:'pointer',height:22}} onClick={()=>sel(s.sym,s.tv)}>
-                      <td style={{padding:'2px 6px',color:C.amber,fontWeight:700,fontSize:13,width:50}}>{s.sym}</td>
-                      <td style={{padding:'2px 6px',color:C.white,fontWeight:600,fontSize:13,textAlign:'right'}}>{s.last?s.last.toFixed(2):'···'}</td>
-                      <td style={{padding:'2px 6px',color:cc(s.chg),fontSize:12,textAlign:'right'}}>{s.last?(s.chg>0?'+':'')+s.chg.toFixed(2):''}</td>
-                      <td style={{padding:'2px',textAlign:'center'}}><Sp d={s.spark} w={45} h={12} c={s.chg>=0?C.up:C.dn}/></td>
-                      <td style={{padding:'2px 6px',color:cc(s.pctChg),fontWeight:700,fontSize:13,textAlign:'right',width:65}}>{s.last?fpc(s.pctChg):''}</td>
-                    </tr>
-                  ))}
-                </tbody>
+                <tbody>{stk.map((s,i)=>(
+                  <tr key={s.sym} style={{borderBottom:`1px solid ${C.gbord}`,background:i%2?C.galt:C.gbg,cursor:'pointer',height:23}}
+                    onClick={()=>sel(s.sym,s.tv)}>
+                    <td style={{...td,color:C.orange,fontWeight:700,width:55}}>{s.sym}</td>
+                    <td style={{...tdr,color:C.white,fontWeight:600}}>{s.last?fp(s.last):'···'}</td>
+                    <td style={{...tdr,color:cc(s.chg),fontSize:12}}>{s.last?(s.chg>0?'+':'')+fp(s.chg):''}</td>
+                    <td style={{padding:'2px',textAlign:'center'}}><Sp d={s.spark} w={45} h={12} c={s.chg>=0?C.up:C.dn}/></td>
+                    <td style={{...tdr,color:cc(s.pctChg),fontWeight:700,width:60}}>{s.last?fpc(s.pctChg):''}</td>
+                  </tr>
+                ))}</tbody>
               </table>
             </Panel>
-            <Panel title="Commodities & FX" style={{flex:0,flexShrink:0}}>
+            <Panel title="Commodities & FX">
               <table style={{width:'100%',borderCollapse:'collapse'}}>
-                <tbody>
-                  {fut.slice(6).map((f,i)=>(
-                    <tr key={f.sym} style={{borderBottom:`1px solid ${C.gbord}`,background:i%2?C.galt:C.gbg,cursor:'pointer',height:22}} onClick={()=>sel(FUT.find(x=>x.d===f.sym)?.y||'',f.tv)}>
-                      <td style={{padding:'2px 6px',color:C.amber,fontWeight:600,fontSize:13}}>{f.sym}</td>
-                      <td style={{padding:'2px 6px',textAlign:'right',color:C.white,fontSize:13}}>{f.last?fp(f.last,f.last):'···'}</td>
-                      <td style={{padding:'2px 6px',textAlign:'right',color:cc(f.pctChg),fontWeight:600,fontSize:13}}>{f.last?fpc(f.pctChg):''}</td>
-                      <td style={{padding:'2px',textAlign:'center'}}><Sp d={f.spark} w={40} h={12} c={f.chg>=0?C.up:C.dn}/></td>
-                    </tr>
-                  ))}
-                </tbody>
+                <tbody>{fut.slice(6).map((f,i)=>(
+                  <tr key={f.sym} style={{borderBottom:`1px solid ${C.gbord}`,background:i%2?C.galt:C.gbg,cursor:'pointer',height:23}}
+                    onClick={()=>sel(FUT.find(x=>x.d===f.sym)?.y||'',f.tv)}>
+                    <td style={{...td,color:C.amber,fontWeight:600}}>{f.sym}</td>
+                    <td style={{...tdr,color:C.white}}>{f.last?fp(f.last):'···'}</td>
+                    <td style={{...tdr,color:cc(f.pctChg),fontWeight:600}}>{f.last?fpc(f.pctChg):''}</td>
+                    <td style={{padding:'2px',textAlign:'center'}}><Sp d={f.spark} w={40} h={12} c={f.chg>=0?C.up:C.dn}/></td>
+                  </tr>
+                ))}</tbody>
               </table>
             </Panel>
           </div>
         </div>
 
-        {/* ═══ BOTTOM ROW: Clock ═══ */}
-        <div style={{flex:0,flexShrink:0,height:60,background:C.panel,border:`1px solid ${C.border}`,display:'flex',alignItems:'center',justifyContent:'space-around',padding:'0 20px'}}>
-          {[
-            {c:'Chicago',t:clk.c,d:clk.cd,g:'-6'},{c:'New York',t:clk.n,d:clk.nd,g:'-5'},
-            {c:'London',t:clk.l,d:clk.ld,g:'+0'},{c:'Hong Kong',t:clk.h,d:clk.hd,g:'+8'},
-            {c:'Sydney',t:clk.s,d:clk.sd,g:'+10'},
-          ].map(z=>(
+        {/* ═══ ROW 3: Clock ═══ */}
+        <div style={{height:56,flexShrink:0,background:C.panel,border:`1px solid ${C.border}`,display:'flex',alignItems:'center',justifyContent:'space-around',padding:'0 16px'}}>
+          {[{c:'Chicago',t:clk.c,d:clk.cd,g:'-6'},{c:'New York',t:clk.n,d:clk.nd,g:'-5'},{c:'London',t:clk.l,d:clk.ld,g:'+0'},{c:'Hong Kong',t:clk.h,d:clk.hd,g:'+8'},{c:'Sydney',t:clk.s,d:clk.sd,g:'+10'}].map(z=>(
             <div key={z.c} style={{textAlign:'center'}}>
-              <div style={{color:C.amber,fontSize:22,fontWeight:700,letterSpacing:2,fontFamily:'Consolas,monospace'}}>{z.t||'--:--:--'}</div>
-              <div style={{color:C.gray,fontSize:11}}>
-                {z.d} <span style={{fontWeight:600}}>{z.c}</span> <span style={{color:C.dim}}>GMT{z.g}</span>
-              </div>
+              <div style={{color:C.amber,fontSize:22,fontWeight:700,letterSpacing:2}}>{z.t||'--:--:--'}</div>
+              <div style={{color:C.gray,fontSize:10}}>{z.d} <b>{z.c}</b> <span style={{color:C.dim}}>GMT{z.g}</span></div>
             </div>
           ))}
         </div>
