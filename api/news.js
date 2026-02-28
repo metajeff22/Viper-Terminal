@@ -1,7 +1,4 @@
-// /api/news.js — Vercel serverless function
-// Fetches live financial news from public RSS feeds
-// Usage: /api/news
-
+// /api/news.js — Live financial news from RSS feeds
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=120');
@@ -12,8 +9,23 @@ export default async function handler(req, res) {
     { url: 'https://www.cnbc.com/id/100003114/device/rss/rss.html', src: 'CNBC' },
     { url: 'https://www.cnbc.com/id/10001147/device/rss/rss.html', src: 'CNBC' },
     { url: 'https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US', src: 'YF' },
-    { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258', src: 'CNBC' },
   ];
+
+  // Decode HTML entities server-side
+  function decode(s) {
+    if (!s) return '';
+    return s
+      .replace(/<!\[CDATA\[|\]\]>/g, '')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'")
+      .replace(/&#x20[12][0-9a-fA-F];/g, "'")  // smart quotes
+      .replace(/&#x201[cCdD];/g, '"')           // smart double quotes
+      .replace(/&#x20(14|13);/g, '—')           // em/en dash
+      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n))
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+      .replace(/<[^>]+>/g, '')  // strip any remaining HTML tags
+      .trim();
+  }
 
   try {
     const results = await Promise.allSettled(
@@ -24,29 +36,20 @@ export default async function handler(req, res) {
         });
         if (!resp.ok) throw new Error(`${resp.status}`);
         const xml = await resp.text();
-        
-        // Simple XML parsing for RSS items
         const items = [];
-        const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-        let match;
-        while ((match = itemRegex.exec(xml)) !== null && items.length < 8) {
-          const content = match[1];
-          const title = content.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/)?.[1] || '';
-          const pubDate = content.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || '';
-          const link = content.match(/<link>(.*?)<\/link>/)?.[1] || '';
-          
-          if (title && title.length > 10) {
+        const re = /<item>([\s\S]*?)<\/item>/g;
+        let m;
+        while ((m = re.exec(xml)) !== null && items.length < 10) {
+          const c = m[1];
+          const title = decode(c.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '');
+          const pubDate = c.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || '';
+          if (title && title.length > 15) {
             const date = new Date(pubDate);
-            const time = !isNaN(date) ? date.toLocaleTimeString('en-US', { 
-              hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York' 
-            }) : '';
-            
             items.push({
-              title: title.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&quot;/g, '"'),
-              time,
+              title,
+              time: !isNaN(date) ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York' }) : '',
               ts: !isNaN(date) ? date.getTime() : 0,
               src: feed.src,
-              link,
             });
           }
         }
@@ -54,29 +57,12 @@ export default async function handler(req, res) {
       })
     );
 
-    // Flatten, dedupe by title, sort by timestamp
-    const allItems = results
-      .filter(r => r.status === 'fulfilled')
-      .flatMap(r => r.value)
-      .filter(item => item.ts > 0);
-    
-    // Dedupe by similar titles
+    const all = results.filter(r => r.status === 'fulfilled').flatMap(r => r.value).filter(i => i.ts > 0);
     const seen = new Set();
-    const deduped = allItems.filter(item => {
-      const key = item.title.toLowerCase().slice(0, 50);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    // Sort newest first
+    const deduped = all.filter(i => { const k = i.title.toLowerCase().slice(0, 40); if (seen.has(k)) return false; seen.add(k); return true; });
     deduped.sort((a, b) => b.ts - a.ts);
 
-    return res.status(200).json({ 
-      news: deduped.slice(0, 30), 
-      ts: Date.now(),
-      count: deduped.length 
-    });
+    return res.status(200).json({ news: deduped.slice(0, 40), ts: Date.now() });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
